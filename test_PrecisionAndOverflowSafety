@@ -1,0 +1,480 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.27;
+
+import "forge-std/Test.sol";
+import "../src/BRVBTCStaking.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+// ERC20 Mock per test
+contract BRVToken is ERC20 {
+    constructor() ERC20("BRV BTC", "BRVBTC") {
+        _mint(msg.sender, 21_000_000 * 10**18);
+    }
+    function decimals() public pure override returns (uint8) { return 18; }
+}
+
+contract WBTCToken is ERC20 {
+    constructor() ERC20("Wrapped BTC", "WBTC") {
+        _mint(msg.sender, 21_000_000 * 10**8);
+    }
+    function decimals() public pure override returns (uint8) { return 8; }
+}
+
+// Token dummy per test sweep
+contract DummyToken is ERC20 {
+    constructor() ERC20("Dummy", "DUM") {
+        _mint(msg.sender, 1000 * 10**18);
+    }
+}
+
+contract BRVBTCStakingTest is Test {
+    BRVToken public brv;
+    WBTCToken public wbtc;
+    DummyToken public dummy;
+    BRVBTCStaking public staking;
+    
+    address public owner = address(0x123);
+    address public staker1 = address(0x456);
+    address public staker2 = address(0x789);
+    address public rewarder = address(0xABC);
+    
+    uint256 constant PRECISION = 1e18;
+    
+    function setUp() public {
+        vm.startPrank(owner);
+        
+        brv = new BRVToken();
+        wbtc = new WBTCToken();
+        dummy = new DummyToken();
+        staking = new BRVBTCStaking(address(brv), address(wbtc));
+        
+        vm.stopPrank();
+        
+        // Distribuisci token di test
+        vm.startPrank(owner);
+        brv.transfer(staker1, 10000 * 10**18);
+        brv.transfer(staker2, 10000 * 10**18);
+        wbtc.transfer(rewarder, 1000 * 10**8);
+        dummy.transfer(owner, 1000 * 10**18);
+        vm.stopPrank();
+        
+        // Approvazioni
+        vm.startPrank(staker1);
+        brv.approve(address(staking), type(uint256).max);
+        vm.stopPrank();
+        
+        vm.startPrank(staker2);
+        brv.approve(address(staking), type(uint256).max);
+        vm.stopPrank();
+        
+        vm.startPrank(rewarder);
+        wbtc.approve(address(staking), type(uint256).max);
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 1: DEPOSIT E WITHDRAW ==========
+    
+    function test_DepositNoLock() public {
+        vm.startPrank(staker1);
+        
+        uint256 amount = 1000 * 10**18;
+        
+        staking.deposit(amount, 0);
+        
+        (uint256 userAmount, uint256 virtualAmount, uint256 lockUntil, , ) = staking.getUserInfo(staker1);
+        
+        assertEq(userAmount, amount);
+        assertEq(virtualAmount, amount);
+        assertEq(lockUntil, 0);
+        assertEq(staking.totalStaked(), amount);
+        assertEq(staking.totalVirtualStaked(), amount);
+        
+        vm.stopPrank();
+    }
+    
+    function test_DepositWithLock() public {
+        vm.startPrank(staker1);
+        
+        uint256 amount = 1000 * 10**18;
+        uint256 lockDays = 30;
+        uint256 multiplier = 1e18 + (lockDays * 5e15);
+        uint256 virtualAmount = (amount * multiplier) / 1e18;
+        uint256 expectedLockUntil = block.timestamp + (lockDays * 1 days);
+        
+        staking.deposit(amount, lockDays);
+        
+        (uint256 userAmount, uint256 virtualAmountActual, uint256 lockUntil, , ) = staking.getUserInfo(staker1);
+        
+        assertEq(userAmount, amount);
+        assertEq(virtualAmountActual, virtualAmount);
+        assertTrue(lockUntil >= expectedLockUntil);
+        
+        vm.stopPrank();
+    }
+    
+    function test_CannotWithdrawDuringLock() public {
+        vm.startPrank(staker1);
+        
+        staking.deposit(1000 * 10**18, 7);
+        vm.warp(block.timestamp + 5 days);
+        
+        vm.expectRevert("account locked");
+        staking.withdraw(500 * 10**18);
+        
+        vm.stopPrank();
+    }
+    
+    function test_CanWithdrawAfterLock() public {
+        vm.startPrank(staker1);
+        
+        staking.deposit(1000 * 10**18, 1);
+        vm.warp(block.timestamp + 2 days);
+        
+        staking.withdraw(1000 * 10**18);
+        
+        (uint256 amount, , , , ) = staking.getUserInfo(staker1);
+        assertEq(amount, 0);
+        
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 2: MOLTIPLICATORE E BOOST ==========
+    
+    function test_MultiplierIsCorrect() public {
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 30);
+        vm.stopPrank();
+        
+        vm.startPrank(staker2);
+        staking.deposit(1000 * 10**18, 0);
+        vm.stopPrank();
+        
+        // Avanza il tempo oltre il cooldown
+        vm.warp(block.timestamp + 2 hours);
+        
+        vm.startPrank(rewarder);
+        uint256 rewardAmount = 100 * 10**8;
+        staking.addReward(rewardAmount);
+        vm.stopPrank();
+        
+        uint256 pending1 = staking.pendingReward(staker1);
+        uint256 pending2 = staking.pendingReward(staker2);
+        
+        assertTrue(pending1 > pending2);
+        
+        // Verifica proporzione approssimativa (1.15x vs 1x)
+        uint256 ratio = (pending1 * 1e18) / pending2;
+        // Ratio dovrebbe essere ~1.15 (1150/1000)
+        assertTrue(ratio > 1.14e18 && ratio < 1.16e18);
+    }
+    
+    // ========== TEST 3: DISTRIBUZIONE REWARD ==========
+    
+    function test_RewardDistribution() public {
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 0);
+        vm.stopPrank();
+        
+        vm.warp(block.timestamp + 2 hours);
+        
+        vm.startPrank(rewarder);
+        uint256 rewardAmount = 10 * 10**8;
+        staking.addReward(rewardAmount);
+        vm.stopPrank();
+        
+        vm.warp(block.timestamp + 1 hours); // Attendi cooldown
+        
+        uint256 pending1 = staking.pendingReward(staker1);
+        assertEq(pending1, (rewardAmount * 95) / 100);
+        
+        uint256 balanceBefore = wbtc.balanceOf(staker1);
+        
+        vm.startPrank(staker1);
+        staking.claim();
+        vm.stopPrank();
+        
+        uint256 balanceAfter = wbtc.balanceOf(staker1);
+        assertEq(balanceAfter - balanceBefore, (rewardAmount * 95) / 100);
+    }
+    
+    // ========== TEST 4: COOLDOWN ANTI-FRONTRUNNING ==========
+    
+    function test_CooldownBlocksImmediateClaim() public {
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 0);
+        vm.stopPrank();
+        
+        vm.startPrank(rewarder);
+        staking.addReward(10 * 10**8);
+        vm.stopPrank();
+        
+        uint256 pending = staking.pendingReward(staker1);
+        assertEq(pending, 0);
+        
+        vm.warp(block.timestamp + 1 hours);
+        
+        pending = staking.pendingReward(staker1);
+        assertTrue(pending > 0);
+    }
+    
+    function test_NewDepositExtendsCooldown() public {
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 0);
+        vm.stopPrank();
+        
+        vm.warp(block.timestamp + 30 minutes);
+        
+        vm.startPrank(staker1);
+        staking.deposit(500 * 10**18, 0);
+        vm.stopPrank();
+        
+        vm.startPrank(rewarder);
+        staking.addReward(10 * 10**8);
+        vm.stopPrank();
+        
+        uint256 pending = staking.pendingReward(staker1);
+        assertEq(pending, 0);
+    }
+    
+    // ========== TEST 5: EMERGENCY WITHDRAW ==========
+    
+    function test_EmergencyWithdraw() public {
+        vm.startPrank(staker1);
+        
+        staking.deposit(1000 * 10**18, 30);
+        staking.deposit(500 * 10**18, 0);
+        
+        uint256 initialBrv = brv.balanceOf(staker1);
+        
+        staking.emergencyWithdraw();
+        
+        uint256 finalBrv = brv.balanceOf(staker1);
+        assertEq(finalBrv - initialBrv, 1500 * 10**18);
+        
+        (uint256 amount, , , , ) = staking.getUserInfo(staker1);
+        assertEq(amount, 0);
+        
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 6: ADDREWARD PERMISSIONLESS ==========
+    
+    function test_AddRewardPermissionless() public {
+        // Prima crea uno staker
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 0);
+        vm.stopPrank();
+        
+        address randomUser = address(0xDEF);
+        vm.startPrank(rewarder);
+        wbtc.transfer(randomUser, 100 * 10**8);
+        vm.stopPrank();
+        
+        vm.startPrank(randomUser);
+        wbtc.approve(address(staking), type(uint256).max);
+        staking.addReward(50 * 10**8);
+        vm.stopPrank();
+        
+        assertTrue(true);
+    }
+    
+    function test_AddRewardFailsWhenNoStakers() public {
+        address newRewarder = address(0x111);
+        vm.startPrank(owner);
+        wbtc.transfer(newRewarder, 10 * 10**8);
+        vm.stopPrank();
+        
+        vm.startPrank(newRewarder);
+        wbtc.approve(address(staking), type(uint256).max);
+        
+        vm.expectRevert("no stakers");
+        staking.addReward(10 * 10**8);
+        vm.stopPrank();
+    }
+    
+    function test_AddRewardFailsWhenAmountTooSmall() public {
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 0);
+        vm.stopPrank();
+        
+        vm.startPrank(rewarder);
+        vm.expectRevert("reward too small");
+        staking.addReward(1);
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 7: PERFORMANCE FEE ==========
+    
+    function test_OwnerCanUpdatePerformanceFee() public {
+        vm.startPrank(owner);
+        
+        uint256 newFee = 10e16;
+        staking.setPerformanceFee(newFee);
+        assertEq(staking.performanceFee(), newFee);
+        
+        vm.stopPrank();
+    }
+    
+    function test_NonOwnerCannotUpdateFee() public {
+        vm.startPrank(staker1);
+        vm.expectRevert();
+        staking.setPerformanceFee(10e16);
+        vm.stopPrank();
+    }
+    
+    function test_FeeCappedAt20Percent() public {
+        vm.startPrank(owner);
+        
+        vm.expectRevert("fee max 20%");
+        staking.setPerformanceFee(30e16);
+        
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 8: SWEEP ==========
+    
+    function test_OwnerCanSweep() public {
+        vm.startPrank(owner);
+        // Trasferisci dummy token al contratto di staking
+        dummy.transfer(address(staking), 100 * 10**18);
+        
+        uint256 balanceBefore = dummy.balanceOf(owner);
+        staking.sweep(IERC20(address(dummy)), owner, 50 * 10**18);
+        uint256 balanceAfter = dummy.balanceOf(owner);
+        
+        assertEq(balanceAfter - balanceBefore, 50 * 10**18);
+        vm.stopPrank();
+    }
+    
+    function test_CannotSweepStakingTokens() public {
+        vm.startPrank(owner);
+        
+        vm.expectRevert("cannot sweep staking tokens");
+        staking.sweep(IERC20(address(brv)), owner, 100);
+        
+        vm.expectRevert("cannot sweep staking tokens");
+        staking.sweep(IERC20(address(wbtc)), owner, 100);
+        
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 9: LOCK EXTENSION ==========
+    
+    function test_MultipleDepositsExtendLock() public {
+        vm.startPrank(staker1);
+        
+        staking.deposit(1000 * 10**18, 7);
+        (,, uint256 lockUntil1,,) = staking.getUserInfo(staker1);
+        
+        vm.warp(block.timestamp + 3 days);
+        
+        staking.deposit(500 * 10**18, 30);
+        (,, uint256 lockUntil2,,) = staking.getUserInfo(staker1);
+        
+        assertTrue(lockUntil2 > lockUntil1);
+        
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 10: PRECISION E SAFETY ==========
+    
+    function test_PrecisionAndOverflowSafety() public {
+    // Test 1: Overflow protection su deposit con amount enorme
+    vm.startPrank(owner);
+    // Crea un indirizzo con fondi illimitati (vm.prank + deal)
+    address whale = address(0x777);
+    vm.deal(whale, 100 ether); // Solo per gas
+    
+    // Mint direttamente al whale (owner puo' mintare)
+    brv.transfer(whale, 1_000_000 * 10**18);
+    vm.stopPrank();
+    
+    vm.startPrank(whale);
+    brv.approve(address(staking), type(uint256).max);
+    
+    // Deposit con amount molto grande (ma entro i limiti)
+    uint256 largeAmount = 1_000_000 * 10**18; // 1 milione di BRVBTC
+    staking.deposit(largeAmount, 0);
+    vm.stopPrank();
+    
+    // Test 2: Overflow protection su addReward con amount enorme
+    vm.startPrank(owner);
+    // Dai WBTC al whale
+    wbtc.transfer(whale, 1_000_000_000 * 10**8); // 1 miliardo di WBTC
+    vm.stopPrank();
+    
+    vm.startPrank(whale);
+    wbtc.approve(address(staking), type(uint256).max);
+    
+    // Warp oltre il cooldown
+    vm.warp(block.timestamp + 2 hours);
+    
+    // Aggiungi reward enorme
+    uint256 hugeReward = 100_000_000 * 10**8; // 100 milioni di WBTC
+    staking.addReward(hugeReward);
+    vm.stopPrank();
+    
+    // Test 3: Verifica che non ci siano underflow
+    vm.warp(block.timestamp + 1 hours);
+    uint256 pending = staking.pendingReward(whale);
+    assertTrue(pending > 0);
+    
+    // Test 4: Claim con pending enorme (nessun overflow)
+    uint256 balanceBefore = wbtc.balanceOf(whale);
+    vm.startPrank(whale);
+    staking.claim();
+    vm.stopPrank();
+    uint256 balanceAfter = wbtc.balanceOf(whale);
+    
+    assertTrue(balanceAfter > balanceBefore);
+    
+    // Test 5: Emergency withdraw funziona anche con grandi amount
+    vm.startPrank(whale);
+    uint256 brvBalanceBefore = brv.balanceOf(whale);
+    staking.emergencyWithdraw();
+    uint256 brvBalanceAfter = brv.balanceOf(whale);
+    
+    assertEq(brvBalanceAfter - brvBalanceBefore, largeAmount);
+    vm.stopPrank();
+}
+    
+    // ========== TEST 11: LOCK WITH ZERO DAYS ==========
+    
+    function test_LockZeroDaysAllowsImmediateWithdraw() public {
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 0);
+        
+        uint256 balanceBefore = brv.balanceOf(staker1);
+        staking.withdraw(1000 * 10**18);
+        uint256 balanceAfter = brv.balanceOf(staker1);
+        
+        assertEq(balanceAfter - balanceBefore, 1000 * 10**18);
+        vm.stopPrank();
+    }
+    
+    // ========== TEST 12: REWARD WITH MULTIPLE STAKERS ==========
+    
+    function test_RewardWithMultipleStakers() public {
+        vm.startPrank(staker1);
+        staking.deposit(1000 * 10**18, 0);
+        vm.stopPrank();
+        
+        vm.startPrank(staker2);
+        staking.deposit(2000 * 10**18, 0);
+        vm.stopPrank();
+        
+        vm.warp(block.timestamp + 2 hours);
+        
+        vm.startPrank(rewarder);
+        staking.addReward(30 * 10**8);
+        vm.stopPrank();
+        
+        vm.warp(block.timestamp + 1 hours);
+        
+        uint256 pending1 = staking.pendingReward(staker1);
+        uint256 pending2 = staking.pendingReward(staker2);
+        
+        // Proporzione 1:2 (con approssimazione)
+        assertApproxEqRel(pending2, pending1 * 2, 0.02e18);
+    }
+}

@@ -62,14 +62,6 @@ A **DeFi dashboard** that allows users to stake BRVBTC tokens and earn **real WB
 | Bridge | [`0xe8681d55585FcDA6a4a39c9a59f39b63fbBa88e8`](https://etherscan.io/address/0xe8681d55585fcda6a4a39c9a59f39b63fbba88e8#code) | ✅ Active |
 | Uniswap V4 Pool | Pool ID: [`0x000000000004444c5dc75cB358380D2e3dE08A90`](https://etherscan.io/address/0x000000000004444c5dc75cb358380d2e3de08a90#code) | ✅ Active |
 
-### Arbitrum L2
-
-| Contract | Address | Status |
-|----------|---------|--------|
-| Staking Contract | [`0x5Ea83b4c928Aa4055D02592f3AFE0fE87318598D`](https://arbiscan.com/address/0x5Ea83b4c928Aa4055D02592f3AFE0fE87318598D#code) | ✅ Verified |
-| BRVBTC Token | [`0x71585d90E726b82c3C435212995Fe49ADef98343`](https://arbiscan.io/token/0x71585d90e726b82c3c435212995fe49adef98343#code) | ✅ Deployed |
-| Uniswap V4 Pool | Pool ID: [`0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32`](https://arbiscan.io/address/0x360e68faccca8ca495c1b759fd9eee466db9fb32#code) | ✅ Active |
-
 ### Polygon L2
 
 | Contract | Address | Status |
@@ -78,6 +70,14 @@ A **DeFi dashboard** that allows users to stake BRVBTC tokens and earn **real WB
 | BRVBTC Token | [`0xa5c96d77C280B9F4bA13cd4064C4864Cf69a3BCB`](https://polygonscan.com/address/0xa5c96d77c280b9f4ba13cd4064c4864cf69a3bcb#code) | ✅ Deployed |
 | Bridge | [`0x0Ef6a63a16fB21dD8398183a154596953Ce4E835`](https://polygonscan.com/address/0x0ef6a63a16fb21dd8398183a154596953ce4e835#code) | ✅ Active |
 | Uniswap V4 Pool | Pool ID: [`0x67366782805870060151383f4bbff9dab53e5cd6`](https://polygonscan.com/address/0x67366782805870060151383f4bbff9dab53e5cd6#code) | ✅ Active |
+
+### Arbitrum L3
+
+| Contract | Address | Status |
+|----------|---------|--------|
+| Staking Contract | [`0x5Ea83b4c928Aa4055D02592f3AFE0fE87318598D`](https://arbiscan.com/address/0x5Ea83b4c928Aa4055D02592f3AFE0fE87318598D#code) | ✅ Verified |
+| BRVBTC Token | [`0x71585d90E726b82c3C435212995Fe49ADef98343`](https://arbiscan.io/token/0x71585d90e726b82c3c435212995fe49adef98343#code) | ✅ Deployed |
+| Uniswap V4 Pool | Pool ID: [`0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32`](https://arbiscan.io/address/0x360e68faccca8ca495c1b759fd9eee466db9fb32#code) | ✅ Active |
 
 ---
 

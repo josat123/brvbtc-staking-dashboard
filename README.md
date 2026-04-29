@@ -59,7 +59,7 @@ A **DeFi dashboard** that allows users to stake BRVBTC tokens and earn **real WB
 |----------|---------|--------|
 | Staking Contract | [`0xd1d82b4b4ab5998954952e4635abf54e10b8b919`](https://etherscan.io/address/0xd1d82b4b4ab5998954952e4635abf54e10b8b919#code) | ✅ Verified |
 | BRVBTC Token | [`0x9bc0F4d4B31AdEa0c7Fde6f40a778E4Ce7Bc652d`](https://etherscan.io/token/0x9bc0F4d4B31AdEa0c7Fde6f40a778E4Ce7Bc652d) | ✅ Deployed |
-| Bridge | `0xe8681d55585FcDA6a4a39c9a59f39b63fbBa88e8` | ✅ Active |
+| Bridge | [`0xe8681d55585FcDA6a4a39c9a59f39b63fbBa88e8`](https://etherscan.io/address/0xe8681d55585fcda6a4a39c9a59f39b63fbba88e8#code) | ✅ Active |
 | Uniswap V4 Pool | Pool ID: [`0x000000000004444c5dc75cB358380D2e3dE08A90`](https://etherscan.io/address/0x000000000004444c5dc75cb358380d2e3de08a90#code) | ✅ Active |
 
 ### Arbitrum L2
